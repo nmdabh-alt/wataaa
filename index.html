@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Weather Forecast</title>
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>Weather Forecast</h1>
+        <button id="unit-toggle" type="button" aria-label="Switch temperature unit">°C</button>
+      </header>
+      <form id="search-form">
+        <input id="city-input" type="text" placeholder="Enter a city, e.g. Manama" required />
+        <button type="submit">Search</button>
+      </form>
+      <p id="status"></p>
+      <section id="current" hidden></section>
+      <section id="forecast"></section>
+    </main>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
