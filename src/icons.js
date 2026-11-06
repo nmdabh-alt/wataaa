@@ -52,5 +52,13 @@ export function weatherIcon(kind, isDay = true) {
 export const dropIcon =
   '<svg class="stat-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3s-6 7-6 11a6 6 0 0 0 12 0c0-4-6-11-6-11z"/></svg>'
 
+const HORIZON_SUN = '<path d="M7 18a5 5 0 0 1 10 0M2 21h20"/>'
+
+export const sunriseIcon =
+  `<svg class="stat-icon stat-icon-line stat-icon-sun" viewBox="0 0 24 24" aria-hidden="true">${HORIZON_SUN}<path d="M12 3v7M9 6l3-3 3 3"/></svg>`
+
+export const sunsetIcon =
+  `<svg class="stat-icon stat-icon-line stat-icon-sunset" viewBox="0 0 24 24" aria-hidden="true">${HORIZON_SUN}<path d="M12 3v7M9 7l3 3 3-3"/></svg>`
+
 export const windIcon =
   '<svg class="stat-icon stat-icon-line" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8h10a3 3 0 1 0-3-3M3 12h15a3 3 0 1 1-3 3M3 16h7"/></svg>'

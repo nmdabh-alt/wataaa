@@ -1,5 +1,5 @@
 import './style.css'
-import { weatherIcon, dropIcon, windIcon } from './icons.js'
+import { weatherIcon, dropIcon, windIcon, sunriseIcon, sunsetIcon } from './icons.js'
 import { supabase } from './supabase.js'
 
 const form = document.querySelector('#search-form')
@@ -71,13 +71,44 @@ async function getForecast(latitude, longitude) {
     latitude,
     longitude,
     current: 'temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code,is_day',
-    daily: 'weather_code,temperature_2m_max,temperature_2m_min',
+    daily: 'weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset',
     timezone: 'auto',
-    forecast_days: 5,
+    forecast_days: 16, // the most the forecast API offers
   })
   const res = await fetch(`https://api.open-meteo.com/v1/forecast?${params}`)
   if (!res.ok) throw new Error('Forecast request failed')
   return res.json()
+}
+
+// Long-range outlook for the days past the 16-day forecast. The seasonal model
+// returns 51 ensemble runs per variable (temperature_2m_max, _member01..._member50);
+// we show their average.
+async function getOutlook(latitude, longitude) {
+  const params = new URLSearchParams({
+    latitude,
+    longitude,
+    daily: 'weather_code,temperature_2m_max,temperature_2m_min',
+    timezone: 'auto',
+    forecast_days: 30,
+  })
+  const res = await fetch(`https://seasonal-api.open-meteo.com/v1/seasonal?${params}`)
+  if (!res.ok) throw new Error('Outlook request failed')
+  const { daily } = await res.json()
+  const mean = (variable, i) => {
+    const pattern = new RegExp(`^${variable}(_member\\d+)?$`)
+    const values = Object.keys(daily)
+      .filter((key) => pattern.test(key))
+      .map((key) => daily[key][i])
+      .filter((v) => v != null)
+    return values.length ? values.reduce((a, b) => a + b, 0) / values.length : null
+  }
+  return daily.time.map((date, i) => ({
+    date,
+    code: daily.weather_code[i],
+    min: mean('temperature_2m_min', i),
+    max: mean('temperature_2m_max', i),
+    outlook: true,
+  }))
 }
 
 function render(place, weather) {
@@ -100,39 +131,111 @@ function render(place, weather) {
     <div class="stats">
       <span class="stat">${dropIcon} Humidity ${c.relative_humidity_2m}%</span>
       <span class="stat">${windIcon} Wind ${c.wind_speed_10m} km/h</span>
+      <span class="stat">${sunriseIcon} Sunrise ${clockTime(weather.daily.sunrise[0])}</span>
+      <span class="stat">${sunsetIcon} Sunset ${clockTime(weather.daily.sunset[0])}</span>
       <button class="save-button" type="button"></button>
     </div>`
   updateSaveButton()
   currentEl.querySelector('h2').textContent =
     place.name + (place.country ? `, ${place.country}` : '')
 
-  const d = weather.daily
-  const lo = Math.min(...d.temperature_2m_min)
-  const hi = Math.max(...d.temperature_2m_max)
-  const span = hi - lo || 1
-  forecastEl.innerHTML = d.time
-    .map((day, i) => {
-      const label = i === 0 ? 'Today' : new Date(day).toLocaleDateString('en-GB', {
-        weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC',
-      })
-      const min = d.temperature_2m_min[i]
-      const max = d.temperature_2m_max[i]
-      const left = ((min - lo) / span) * 100
-      const width = ((max - min) / span) * 100
-      return `
-        <div class="day">
-          ${weatherIcon(kindOf(d.weather_code[i]))}
-          <div class="day-label">
-            <strong>${label}</strong>
-            <span>${describe(d.weather_code[i])}</span>
-          </div>
-          <span class="lo">${formatTemp(min)}°</span>
-          <div class="bar"><div class="bar-fill" style="left:${left}%;width:${width}%;background:linear-gradient(90deg, ${tempColor(min)}, ${tempColor(max)})"></div></div>
-          <span class="hi">${formatTemp(max)}°</span>
-        </div>`
-    })
-    .join('')
+  renderForecast()
 }
+
+// Open-Meteo gives local times like "2026-11-06T05:50"; keep the HH:MM part
+const clockTime = (iso) => (iso ? iso.slice(11, 16) : '—')
+
+const RANGES = [5, 10, 30]
+let range = 5
+try {
+  const saved = Number(localStorage.getItem('range'))
+  if (RANGES.includes(saved)) range = saved
+} catch {}
+
+function forecastDays(result) {
+  const d = result.weather.daily
+  const days = d.time
+    .map((date, i) => ({
+      date,
+      code: d.weather_code[i],
+      min: d.temperature_2m_min[i],
+      max: d.temperature_2m_max[i],
+      outlook: false,
+    }))
+    .filter((day) => day.min != null && day.max != null)
+  if (range > days.length && result.outlook) {
+    const lastDate = days.at(-1).date
+    days.push(...result.outlook.filter((day) => day.date > lastDate && day.min != null))
+  }
+  return days.slice(0, range)
+}
+
+async function loadOutlook(result) {
+  if (result.outlook || result.outlookState) return
+  result.outlookState = 'loading'
+  try {
+    result.outlook = await getOutlook(result.place.latitude, result.place.longitude)
+    result.outlookState = 'done'
+  } catch {
+    result.outlookState = 'failed'
+  }
+  if (lastResult === result) renderForecast()
+}
+
+function renderForecast() {
+  if (!lastResult) return
+  const days = forecastDays(lastResult)
+  const lo = Math.min(...days.map((day) => day.min))
+  const hi = Math.max(...days.map((day) => day.max))
+  const span = hi - lo || 1
+
+  const rows = days.map((day, i) => {
+    const label = i === 0 ? 'Today' : new Date(day.date).toLocaleDateString('en-GB', {
+      weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC',
+    })
+    const left = ((day.min - lo) / span) * 100
+    const width = ((day.max - day.min) / span) * 100
+    const note = day.outlook && !days[i - 1].outlook
+      ? `<p class="outlook-note">Days ${i + 1}–${days.length} are a long-range outlook: an average of 51 model runs. Treat them as a general trend, not a precise forecast.</p>`
+      : ''
+    return `${note}
+      <div class="day${day.outlook ? ' outlook' : ''}">
+        ${weatherIcon(kindOf(day.code))}
+        <div class="day-label">
+          <strong>${label}</strong>
+          <span>${day.outlook ? 'Outlook' : describe(day.code)}</span>
+        </div>
+        <span class="lo">${formatTemp(day.min)}°</span>
+        <div class="bar"><div class="bar-fill" style="left:${left}%;width:${width}%;background:linear-gradient(90deg, ${tempColor(day.min)}, ${tempColor(day.max)})"></div></div>
+        <span class="hi">${formatTemp(day.max)}°</span>
+      </div>`
+  })
+
+  let status = ''
+  if (range > days.length) {
+    if (lastResult.outlookState === 'failed') {
+      status = `<p class="outlook-note">Couldn't load the long-range outlook, so only ${days.length} days are shown.</p>`
+    } else {
+      status = '<p class="outlook-note">Loading the long-range outlook…</p>'
+      loadOutlook(lastResult)
+    }
+  }
+
+  const tabs = RANGES.map(
+    (n) => `<button type="button" data-range="${n}" aria-pressed="${n === range}">${n} days</button>`,
+  ).join('')
+  forecastEl.innerHTML = `<div class="range-tabs" aria-label="Forecast length">${tabs}</div>${rows.join('')}${status}`
+}
+
+forecastEl.addEventListener('click', (event) => {
+  const button = event.target.closest('[data-range]')
+  if (!button) return
+  range = Number(button.dataset.range)
+  try {
+    localStorage.setItem('range', String(range))
+  } catch {}
+  renderForecast()
+})
 
 function updateToggleLabel() {
   unitToggle.textContent = `°${unit}`

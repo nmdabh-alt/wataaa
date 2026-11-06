@@ -256,7 +256,38 @@ button { font-size: 1rem; cursor: pointer; }
   font-weight: 600;
 }
 .stat-icon { width: 18px; height: 18px; fill: #38bdf8; }
-.stat-icon-line { fill: none; stroke: #2dd4bf; stroke-width: 2; stroke-linecap: round; }
+.stat-icon-line { fill: none; stroke: #2dd4bf; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.stat-icon-sun { stroke: #f59e0b; }
+.stat-icon-sunset { stroke: #f97316; }
+
+.range-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  margin: 10px 0 4px;
+  border-radius: 999px;
+  background: var(--track);
+}
+.range-tabs button {
+  flex: 1;
+  padding: 6px 0;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+.range-tabs button[aria-pressed='true'] { background: var(--accent); color: white; }
+.outlook-note {
+  margin: 8px 0;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: rgba(249, 115, 22, 0.12);
+  font-size: 0.85rem;
+}
+.day.outlook .bar-fill { opacity: 0.65; }
+.day.outlook .wx-icon { opacity: 0.8; }
 
 #forecast {
   margin-top: 16px;
