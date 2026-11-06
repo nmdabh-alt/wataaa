@@ -1,5 +1,6 @@
 import './style.css'
 import { weatherIcon, dropIcon, windIcon } from './icons.js'
+import { supabase } from './supabase.js'
 
 const form = document.querySelector('#search-form')
 const input = document.querySelector('#city-input')
@@ -8,6 +9,13 @@ const currentEl = document.querySelector('#current')
 const forecastEl = document.querySelector('#forecast')
 const unitToggle = document.querySelector('#unit-toggle')
 const emptyEl = document.querySelector('#empty')
+const accountButton = document.querySelector('#account-button')
+const signinForm = document.querySelector('#signin-form')
+const signinEmail = document.querySelector('#signin-email')
+const signinStatus = document.querySelector('#signin-status')
+const favoritesEl = document.querySelector('#favorites')
+const favoritesList = favoritesEl.querySelector('.favorites-list')
+const favoritesNote = favoritesEl.querySelector('.favorites-note')
 
 emptyEl.querySelector('.empty-icon').innerHTML = weatherIcon('partly')
 
@@ -16,6 +24,9 @@ try {
   if (localStorage.getItem('unit') === 'F') unit = 'F'
 } catch {}
 let lastResult = null
+let user = null
+// Saved cities in the order they were added: { row, weather, failed }
+let favorites = []
 
 const formatTemp = (celsius) =>
   Math.round(unit === 'F' ? (celsius * 9) / 5 + 32 : celsius)
@@ -89,7 +100,9 @@ function render(place, weather) {
     <div class="stats">
       <span class="stat">${dropIcon} Humidity ${c.relative_humidity_2m}%</span>
       <span class="stat">${windIcon} Wind ${c.wind_speed_10m} km/h</span>
+      <button class="save-button" type="button"></button>
     </div>`
+  updateSaveButton()
   currentEl.querySelector('h2').textContent =
     place.name + (place.country ? `, ${place.country}` : '')
 
@@ -132,8 +145,184 @@ unitToggle.addEventListener('click', () => {
   } catch {}
   updateToggleLabel()
   if (lastResult) render(lastResult.place, lastResult.weather)
+  renderFavorites()
 })
 updateToggleLabel()
+
+// --- Favorites ---
+
+const sameSpot = (a, b) => a.latitude === b.latitude && a.longitude === b.longitude
+
+function updateSaveButton() {
+  const button = currentEl.querySelector('.save-button')
+  if (!button || !lastResult) return
+  const saved = favorites.some((f) => sameSpot(f.row, lastResult.place))
+  button.textContent = saved ? '★ Saved' : '☆ Save'
+  button.setAttribute('aria-pressed', String(saved))
+}
+
+function showPlace(place, weather) {
+  lastResult = { place, weather }
+  statusEl.textContent = ''
+  render(place, weather)
+  currentEl.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
+function favoriteCard(fav) {
+  const { row, weather, failed } = fav
+  const c = weather?.current
+  const card = document.createElement('div')
+  card.className = 'fav'
+
+  const open = document.createElement('button')
+  open.type = 'button'
+  open.className = 'fav-open'
+  open.disabled = !weather
+  open.innerHTML = `
+    ${c ? weatherIcon(kindOf(c.weather_code), c.is_day === 1) : '<span class="wx-icon"></span>'}
+    <span class="fav-name"></span>
+    <span class="fav-temp">${c ? `${formatTemp(c.temperature_2m)}°` : failed ? '—' : '…'}</span>`
+  open.querySelector('.fav-name').textContent = row.name
+  open.addEventListener('click', () => showPlace(row, weather))
+
+  const remove = document.createElement('button')
+  remove.type = 'button'
+  remove.className = 'fav-remove'
+  remove.textContent = '×'
+  remove.setAttribute('aria-label', `Remove ${row.name}`)
+  remove.addEventListener('click', () => removeFavorite(row.id))
+
+  card.append(open, remove)
+  return card
+}
+
+function renderFavorites() {
+  favoritesEl.hidden = !user
+  if (!user) return
+  favoritesEl.querySelector('.favorites-user').textContent = user.email ?? ''
+  if (!favoritesNote.dataset.error) {
+    favoritesNote.textContent = favorites.length ? '' : 'Search for a city and tap ☆ Save to add it here.'
+  }
+  favoritesList.replaceChildren(...favorites.map(favoriteCard))
+}
+
+async function loadFavorites() {
+  delete favoritesNote.dataset.error
+  const { data, error } = await supabase.from('favorites').select('*').order('created_at')
+  if (error) {
+    favoritesNote.dataset.error = 'true'
+    favoritesNote.textContent = `Couldn't load your cities: ${error.message}`
+    return
+  }
+  favorites = data.map((row) => ({ row, weather: null, failed: false }))
+  renderFavorites()
+  updateSaveButton()
+
+  await Promise.all(
+    favorites.map(async (fav) => {
+      try {
+        fav.weather = await getForecast(fav.row.latitude, fav.row.longitude)
+      } catch {
+        fav.failed = true
+      }
+    }),
+  )
+  renderFavorites()
+}
+
+async function addFavorite(place, weather) {
+  const { data, error } = await supabase
+    .from('favorites')
+    .insert({
+      name: place.name,
+      country: place.country ?? null,
+      latitude: place.latitude,
+      longitude: place.longitude,
+    })
+    .select()
+    .single()
+  if (error) {
+    // 23505 = unique violation: it was saved already, e.g. from another tab
+    statusEl.textContent = error.code === '23505' ? 'That city is already saved.' : `Couldn't save: ${error.message}`
+    if (error.code === '23505') loadFavorites()
+    return
+  }
+  favorites.push({ row: data, weather, failed: false })
+  renderFavorites()
+  updateSaveButton()
+}
+
+async function removeFavorite(id) {
+  const { error } = await supabase.from('favorites').delete().eq('id', id)
+  if (error) {
+    statusEl.textContent = `Couldn't remove: ${error.message}`
+    return
+  }
+  favorites = favorites.filter((f) => f.row.id !== id)
+  renderFavorites()
+  updateSaveButton()
+}
+
+currentEl.addEventListener('click', (event) => {
+  const button = event.target.closest('.save-button')
+  if (!button || !lastResult) return
+  if (!user) {
+    openSignin('Sign in to save your favorite cities.')
+    return
+  }
+  const existing = favorites.find((f) => sameSpot(f.row, lastResult.place))
+  if (existing) removeFavorite(existing.row.id)
+  else addFavorite(lastResult.place, lastResult.weather)
+})
+
+// --- Sign in ---
+
+function openSignin(message = '') {
+  signinForm.hidden = false
+  signinStatus.textContent = message
+  signinEmail.focus()
+}
+
+function updateAccountUI() {
+  accountButton.textContent = user ? 'Sign out' : 'Sign in'
+  accountButton.title = user ? `Signed in as ${user.email}` : ''
+  if (user) signinForm.hidden = true
+}
+
+accountButton.addEventListener('click', async () => {
+  if (user) {
+    await supabase.auth.signOut()
+  } else if (signinForm.hidden) {
+    openSignin()
+  } else {
+    signinForm.hidden = true
+  }
+})
+
+signinForm.addEventListener('submit', async (event) => {
+  event.preventDefault()
+  const email = signinEmail.value.trim()
+  signinStatus.textContent = 'Sending...'
+  const { error } = await supabase.auth.signInWithOtp({
+    email,
+    options: { emailRedirectTo: location.origin + location.pathname },
+  })
+  signinStatus.textContent = error ? error.message : `Check ${email} for your sign-in link.`
+})
+
+supabase.auth.onAuthStateChange((_event, session) => {
+  const next = session?.user ?? null
+  const changed = next?.id !== user?.id
+  user = next
+  updateAccountUI()
+  if (!changed) return // e.g. a token refresh for the same user
+
+  favorites = []
+  renderFavorites()
+  updateSaveButton()
+  // Supabase advises against awaiting its own calls inside this callback
+  if (user) setTimeout(loadFavorites, 0)
+})
 
 form.addEventListener('submit', async (event) => {
   event.preventDefault()

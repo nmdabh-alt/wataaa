@@ -9,13 +9,32 @@
     <main>
       <header>
         <h1>Weather Forecast</h1>
-        <button id="unit-toggle" type="button" aria-label="Switch temperature unit">°C</button>
+        <div class="header-actions">
+          <button id="unit-toggle" class="pill" type="button" aria-label="Switch temperature unit">°C</button>
+          <button id="account-button" class="pill" type="button">Sign in</button>
+        </div>
       </header>
-      <form id="search-form">
+      <form id="signin-form" class="panel" hidden>
+        <p>Sign in to save your favorite cities. We'll email you a sign-in link — no password needed.</p>
+        <div class="row">
+          <input id="signin-email" type="email" placeholder="you@example.com" autocomplete="email" required />
+          <button class="btn-primary" type="submit">Send link</button>
+        </div>
+        <p id="signin-status" role="status"></p>
+      </form>
+      <form id="search-form" class="row">
         <input id="city-input" type="text" placeholder="Enter a city, e.g. Manama" required />
-        <button type="submit">Search</button>
+        <button class="btn-primary" type="submit">Search</button>
       </form>
       <p id="status"></p>
+      <section id="favorites" hidden>
+        <div class="favorites-head">
+          <h2>My cities</h2>
+          <span class="favorites-user"></span>
+        </div>
+        <p class="favorites-note"></p>
+        <div class="favorites-list"></div>
+      </section>
       <section id="empty">
         <div class="empty-icon"></div>
         <p>Search for a city to see the 5-day forecast.</p>
